@@ -51,8 +51,11 @@ static void pushOutData(const jd_frame_t *frame) {
     bp[0] = src[0]; // first word copied last to ensure atomicity
 }
 
-// a nice unused interrupt
-extern "C" void TEMP_IRQHandler() {
+// Software interrupt used by the WebUSB bridge (the host pends it via NVIC ISPR, see buff->irqn).
+// Must not be TEMP: with Bluetooth enabled the SoftDevice owns the TEMP peripheral and its IRQ.
+// SWI3/EGU3 is used neither by the SoftDevice (SWI1, SWI2) nor by CODAL's BLE stack (SWI5).
+#define JD_BRIDGE_IRQn SWI3_EGU3_IRQn
+extern "C" void SWI3_EGU3_IRQHandler() {
     logq_poke();
 }
 
@@ -92,11 +95,13 @@ void mbbridge_init() {
 
     buff = (ExchangeBuffer *)app_alloc(sizeof(*buff));
     memset(buff, 0, sizeof(*buff));
-    buff->irqn = TEMP_IRQn;
+    buff->irqn = JD_BRIDGE_IRQn;
     memcpy(buff->magic, "JDmx\xe9\xc0\xa6\xb0", 8);
     buff->recvBuf[2] = 0xff; // we'll wait until this is cleared by the computer
 
     NVIC_ClearPendingIRQ((IRQn_Type)buff->irqn);
+    // lowest priority: stay clear of the levels reserved by the SoftDevice (0, 1, 4)
+    NVIC_SetPriority((IRQn_Type)buff->irqn, 7);
     NVIC_EnableIRQ((IRQn_Type)buff->irqn);
 
     pxt::logJDFrame = logFrame;
