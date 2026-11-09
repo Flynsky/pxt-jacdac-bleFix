@@ -4,7 +4,7 @@
     "description": "MakeCode support for Jacdac Multi Touch service",
     "dependencies": {
         "core": "*",
-        "jacdac": "github:jacdac/pxt-jacdac"
+        "jacdac": "github:Flynsky/pxt-jacdac-bleFix"
     },
     "files": [
         "constants.ts",

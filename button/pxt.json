@@ -19,7 +19,7 @@
     ],
     "dependencies": {
         "core": "*",
-        "jacdac": "github:jacdac/pxt-jacdac"
+        "jacdac": "github:Flynsky/pxt-jacdac-bleFix"
     },
     "testDependencies": {}
 }
