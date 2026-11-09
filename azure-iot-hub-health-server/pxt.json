@@ -16,8 +16,8 @@
         "settings": "*",
         "net": "*",
         "azureiot": "*",
-        "jacdac": "github:jacdac/pxt-jacdac",
-        "jacdac-azure-iot-hub-health": "github:jacdac/pxt-jacdac/jacdac-azure-iot-hub-health"
+        "jacdac": "github:Flynsky/pxt-jacdac-bleFix",
+        "jacdac-azure-iot-hub-health": "github:Flynsky/pxt-jacdac-bleFix/jacdac-azure-iot-hub-health"
     },
     "testDependencies": {
         "jacdac-iot-s2": "*"

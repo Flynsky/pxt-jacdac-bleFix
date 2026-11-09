@@ -5,9 +5,9 @@
     "dependencies": {
         "core": "*",
         "mouse": "*",
-        "jacdac": "github:jacdac/pxt-jacdac",
-        "jacdac-servers": "github:jacdac/pxt-jacdac/servers",
-        "jacdac-hid-mouse": "github:jacdac/pxt-jacdac/hid-mouse"
+        "jacdac": "github:Flynsky/pxt-jacdac-bleFix",
+        "jacdac-servers": "github:Flynsky/pxt-jacdac-bleFix/servers",
+        "jacdac-hid-mouse": "github:Flynsky/pxt-jacdac-bleFix/hid-mouse"
     },
     "testFiles": [
         "test.ts"

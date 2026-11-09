@@ -5,9 +5,9 @@
     "dependencies": {
         "core": "*",
         "gamepad": "*",
-        "jacdac": "github:jacdac/pxt-jacdac",
-        "jacdac-servers": "github:jacdac/pxt-jacdac/servers",
-        "jacdac-hid-joystick": "github:jacdac/pxt-jacdac/hid-joystick"
+        "jacdac": "github:Flynsky/pxt-jacdac-bleFix",
+        "jacdac-servers": "github:Flynsky/pxt-jacdac-bleFix/servers",
+        "jacdac-hid-joystick": "github:Flynsky/pxt-jacdac-bleFix/hid-joystick"
     },
     "files": [
         "server.ts"

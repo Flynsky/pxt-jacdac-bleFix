@@ -5,13 +5,13 @@
         "core": "*",
         "microphone": "*",
         "data-streamer": "github:microsoft/pxt-data-streamer",
-        "jacdac": "github:jacdac/pxt-jacdac",
-        "jacdac-light-level": "github:jacdac/pxt-jacdac/light-level",
-        "jacdac-temperature": "github:jacdac/pxt-jacdac/temperature",
-        "jacdac-humidity": "github:jacdac/pxt-jacdac/humidity",
-        "jacdac-relay": "github:jacdac/pxt-jacdac/relay",
-        "jacdac-soil-moisture": "github:jacdac/pxt-jacdac/soil-moisture",
-        "jacdac-uv-index": "github:jacdac/pxt-jacdac/uv-index"
+        "jacdac": "github:Flynsky/pxt-jacdac-bleFix",
+        "jacdac-light-level": "github:Flynsky/pxt-jacdac-bleFix/light-level",
+        "jacdac-temperature": "github:Flynsky/pxt-jacdac-bleFix/temperature",
+        "jacdac-humidity": "github:Flynsky/pxt-jacdac-bleFix/humidity",
+        "jacdac-relay": "github:Flynsky/pxt-jacdac-bleFix/relay",
+        "jacdac-soil-moisture": "github:Flynsky/pxt-jacdac-bleFix/soil-moisture",
+        "jacdac-uv-index": "github:Flynsky/pxt-jacdac-bleFix/uv-index"
     },
     "files": [
         "main.ts",

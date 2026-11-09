@@ -12,8 +12,8 @@
     "dependencies": {
         "core": "*",
         "light": "*",
-        "jacdac": "github:jacdac/pxt-jacdac",
-        "jacdac-hid-keyboard-server": "github:jacdac/pxt-jacdac/hid-keyboard-server"
+        "jacdac": "github:Flynsky/pxt-jacdac-bleFix",
+        "jacdac-hid-keyboard-server": "github:Flynsky/pxt-jacdac-bleFix/hid-keyboard-server"
     },
     "testDependencies": {}
 }
