@@ -15,22 +15,38 @@
 #endif
 
 #if JD_CRIT_SOFTDEVICE
-// Only the outermost jd_crit_enter() enters the SoftDevice critical region (which disables all
-// application interrupts in the NVIC, not the SoftDevice's); the depth counter is only touched
-// while application interrupts are masked.
+// Same idea as sd_nvic_critical_region_enter/exit, but self-contained: the SDK's version needs the
+// global nrf_nvic_state, which CODAL does not define (link error). The outermost jd_crit_enter()
+// disables all application IRQs in the NVIC (never the SoftDevice's) and remembers which were on;
+// the outermost jd_crit_exit() turns exactly those back on. PRIMASK is only held for the few
+// instructions that update this state, so the SoftDevice's radio interrupts are never delayed.
 static volatile uint32_t jd_crit_depth;
-static uint8_t jd_crit_nested;
+static uint32_t jd_crit_saved0, jd_crit_saved1;
 
 void jd_crit_enter(void) {
-    uint8_t nested;
-    sd_nvic_critical_region_enter(&nested);
-    if (jd_crit_depth++ == 0)
-        jd_crit_nested = nested;
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    if (jd_crit_depth++ == 0) {
+        jd_crit_saved0 = NVIC->ISER[0] & __NRF_NVIC_APP_IRQS_0;
+        NVIC->ICER[0] = __NRF_NVIC_APP_IRQS_0;
+        jd_crit_saved1 = NVIC->ISER[1] & __NRF_NVIC_APP_IRQS_1;
+        NVIC->ICER[1] = __NRF_NVIC_APP_IRQS_1;
+        __DSB();
+        __ISB();
+    }
+    if (!primask)
+        __enable_irq();
 }
 
 void jd_crit_exit(void) {
-    if (--jd_crit_depth == 0)
-        sd_nvic_critical_region_exit(jd_crit_nested);
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    if (jd_crit_depth > 0 && --jd_crit_depth == 0) {
+        NVIC->ISER[0] = jd_crit_saved0;
+        NVIC->ISER[1] = jd_crit_saved1;
+    }
+    if (!primask)
+        __enable_irq();
 }
 #else
 void jd_crit_enter(void) {
