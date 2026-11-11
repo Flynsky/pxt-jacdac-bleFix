@@ -32,13 +32,13 @@ static LinkedFrame *superFrameRX;
 static bool data_ready_rised;
 
 extern "C" REAL_TIME_FUNC jd_frame_t *app_pull_frame() {
-    target_disable_irq();
+    jd_crit_enter();
     jd_frame_t *res = NULL;
     if (txQ) {
         res = &txQ->frame;
         txQ = txQ->next;
     }
-    target_enable_irq();
+    jd_crit_exit();
     return res;
 }
 
@@ -67,7 +67,7 @@ int copyAndAppend(LinkedFrame *volatile *q, jd_frame_t *frame, int max, uint8_t 
         memcpy(&buf->frame, frame, JD_FRAME_SIZE(frame));
     }
 
-    target_disable_irq();
+    jd_crit_enter();
     auto last = *q;
     int num = 0;
     buf->next = NULL;
@@ -82,7 +82,7 @@ int copyAndAppend(LinkedFrame *volatile *q, jd_frame_t *frame, int max, uint8_t 
             *q = buf;
         buf = NULL;
     }
-    target_enable_irq();
+    jd_crit_exit();
 
     if (buf == NULL) {
         return 0;
@@ -164,12 +164,12 @@ Buffer __physGetPacket() {
     }
 
     if (!superFrameRX) {
-        target_disable_irq();
+        jd_crit_enter();
         if ((superFrameRX = rxQ) != NULL)
             rxQ = rxQ->next;
         if (!superFrameRX)
             data_ready_rised = false;
-        target_enable_irq();
+        jd_crit_exit();
 
         if (!superFrameRX)
             return NULL;

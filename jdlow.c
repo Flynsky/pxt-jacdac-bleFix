@@ -115,13 +115,13 @@ static void flush_tx_queue(void) {
         check_announce();
 
     LOG("flush %d", status);
-    target_disable_irq();
+    jd_crit_enter();
     if (status & (JD_STATUS_RX_ACTIVE | JD_STATUS_TX_ACTIVE)) {
-        target_enable_irq();
+        jd_crit_exit();
         return;
     }
     status |= JD_STATUS_TX_ACTIVE;
-    target_enable_irq();
+    jd_crit_exit();
 
     txPending = 0;
     if (!txFrame) {
@@ -146,7 +146,7 @@ static void flush_tx_queue(void) {
 
 REAL_TIME_FUNC
 static void set_tick_timer(uint8_t statusClear) {
-    target_disable_irq();
+    jd_crit_enter();
     if (statusClear) {
         // LOG("st %d @%d", statusClear, status);
         status &= ~statusClear;
@@ -165,22 +165,22 @@ static void set_tick_timer(uint8_t statusClear) {
             tim_set_timer(10000, tick);
         }
     }
-    target_enable_irq();
+    jd_crit_exit();
 }
 
 static void rx_timeout(void) {
-    target_disable_irq();
+    jd_crit_enter();
     jd_diagnostics.bus_timeout_error++;
     ERROR("RX timeout");
     uart_disable();
     signal_read(0);
     set_tick_timer(JD_STATUS_RX_ACTIVE);
-    target_enable_irq();
+    jd_crit_exit();
     signal_error();
 }
 
 static void setup_rx_timeout(void) {
-    target_disable_irq();
+    jd_crit_enter();
     if (status & JD_STATUS_RX_ACTIVE) {
         uart_flush_rx();
         uint32_t *p = (uint32_t *)rxFrame;
@@ -191,7 +191,7 @@ static void setup_rx_timeout(void) {
             tim_set_timer(JD_FRAME_SIZE(rxFrame) * 12 + 60, rx_timeout);
         }
     }
-    target_enable_irq();
+    jd_crit_exit();
 }
 
 REAL_TIME_FUNC
@@ -292,9 +292,9 @@ void jd_rx_completed(int dataLeft) {
 
 REAL_TIME_FUNC
 void jd_packet_ready(void) {
-    target_disable_irq();
+    jd_crit_enter();
     txPending = 1;
     if (status == 0)
         set_tick_timer(0);
-    target_enable_irq();
+    jd_crit_exit();
 }
