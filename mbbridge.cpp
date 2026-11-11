@@ -61,7 +61,7 @@ extern "C" void SWI3_EGU3_IRQHandler() {
 
 static void logFrame(const uint8_t *data) {
     auto frame = (jd_frame_t *)(void *)data;
-    target_disable_irq();
+    jd_crit_enter();
     if (buff->recvBuf[2] != 0xff) {
         if (logQ || !recvPtr()) {
             copyAndAppend(&logQ, frame, MAX_LOGQ);
@@ -69,12 +69,12 @@ static void logFrame(const uint8_t *data) {
             pushOutData(frame);
         }
     }
-    target_enable_irq();
+    jd_crit_exit();
     logq_poke();
 }
 
 static void logq_poke() {
-    target_disable_irq();
+    jd_crit_enter();
     if (logQ && recvPtr()) {
         auto tmp = logQ;
         logQ = tmp->next;
@@ -85,7 +85,7 @@ static void logq_poke() {
         pxt::sendJDFrame((const uint8_t *)(void *)buff->sendBuf);
         buff->sendBuf[2] = 0;
     }
-    target_enable_irq();
+    jd_crit_exit();
 }
 
 extern "C" uint32_t __StackTop;
