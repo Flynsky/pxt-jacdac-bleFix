@@ -2,6 +2,10 @@
     "name": "jacdac-button",
     "version": "1.9.42",
     "description": "A push-button, which returns to inactive position when not operated anymore.",
+    "dependencies": {
+        "core": "*",
+        "jacdac": "github:Flynsky/pxt-jacdac-bleFix"
+    },
     "files": [
         "constants.ts",
         "client.ts",
@@ -11,15 +15,11 @@
     "testFiles": [
         "test.ts"
     ],
+    "testDependencies": {},
     "supportedTargets": [
         "arcade",
         "microbit",
         "maker",
         "calliopemini"
-    ],
-    "dependencies": {
-        "core": "*",
-        "jacdac": "github:Flynsky/pxt-jacdac-bleFix"
-    },
-    "testDependencies": {}
+    ]
 }
