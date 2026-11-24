@@ -3,6 +3,61 @@
 
 #include "ZSingleWireSerial.h"
 
+// With Bluetooth on CODAL (micro:bit V2 / Calliope mini 3) the SoftDevice owns interrupt
+// priorities 0, 1 and 4 and must never be blocked for long. See jd_crit_enter() in jdlow.h.
+#define JD_CRIT_SOFTDEVICE 0
+#if defined(MICROBIT_CODAL) && MICROBIT_CODAL
+#if CONFIG_ENABLED(DEVICE_BLE)
+#undef JD_CRIT_SOFTDEVICE
+#define JD_CRIT_SOFTDEVICE 1
+#include "nrf_nvic.h"
+#endif
+#endif
+
+#if JD_CRIT_SOFTDEVICE
+// Same idea as sd_nvic_critical_region_enter/exit, but self-contained: the SDK's version needs the
+// global nrf_nvic_state, which CODAL does not define (link error). The outermost jd_crit_enter()
+// disables all application IRQs in the NVIC (never the SoftDevice's) and remembers which were on;
+// the outermost jd_crit_exit() turns exactly those back on. PRIMASK is only held for the few
+// instructions that update this state, so the SoftDevice's radio interrupts are never delayed.
+static volatile uint32_t jd_crit_depth;
+static uint32_t jd_crit_saved0, jd_crit_saved1;
+
+void jd_crit_enter(void) {
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    if (jd_crit_depth++ == 0) {
+        jd_crit_saved0 = NVIC->ISER[0] & __NRF_NVIC_APP_IRQS_0;
+        NVIC->ICER[0] = __NRF_NVIC_APP_IRQS_0;
+        jd_crit_saved1 = NVIC->ISER[1] & __NRF_NVIC_APP_IRQS_1;
+        NVIC->ICER[1] = __NRF_NVIC_APP_IRQS_1;
+        __DSB();
+        __ISB();
+    }
+    if (!primask)
+        __enable_irq();
+}
+
+void jd_crit_exit(void) {
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    if (jd_crit_depth > 0 && --jd_crit_depth == 0) {
+        NVIC->ISER[0] = jd_crit_saved0;
+        NVIC->ISER[1] = jd_crit_saved1;
+    }
+    if (!primask)
+        __enable_irq();
+}
+#else
+void jd_crit_enter(void) {
+    target_disable_irq();
+}
+
+void jd_crit_exit(void) {
+    target_enable_irq();
+}
+#endif
+
 //#define ENABLE_PIN_LOG 1
 
 #define DEVICE_ID DEVICE_ID_JACDAC_PHYS
@@ -132,7 +187,7 @@ void tim_set_timer(int delta, cb_t cb) {
     delta -= JD_TIM_OVERHEAD;
     if (delta < 20)
         delta = 20;
-    target_disable_irq();
+    jd_crit_enter();
     uint16_t prev = currEvent;
     currEvent++;
     if (currEvent == 0)
@@ -140,7 +195,7 @@ void tim_set_timer(int delta, cb_t cb) {
     tim_cb = cb;
     system_timer_event_after_us(delta, DEVICE_ID, currEvent);
     system_timer_cancel_event(DEVICE_ID, prev); // make sure we don't get the same slot
-    target_enable_irq();
+    jd_crit_exit();
 }
 
 REAL_TIME_FUNC
@@ -234,6 +289,15 @@ void uart_init_() {
 #endif
     sws->setBaud(1000000);
 
+#if JD_CRIT_SOFTDEVICE
+    // CODAL's ZSingleWireSerial sets its UARTE interrupt to priority 1, which is reserved for the
+    // SoftDevice. Move it to 2, the highest application level (same as the pin interrupts).
+    const IRQn_Type uarteIrqs[] = {UARTE0_UART0_IRQn, UARTE1_IRQn};
+    for (auto irq : uarteIrqs)
+        if (NVIC_GetPriority(irq) == 1)
+            NVIC_SetPriority(irq, 2);
+#endif
+
     sws->p.setIRQ(line_falling);
     sws->setIRQ(sws_done);
     setup_exti();
@@ -250,9 +314,9 @@ int uart_start_tx(const void *data, uint32_t numbytes) {
     if (status & STATUS_IN_TX)
         jd_panic();
 
-    target_disable_irq();
+    jd_crit_enter();
     if (status & STATUS_IN_RX) {
-        target_enable_irq();
+        jd_crit_exit();
         return -1;
     }
     sws->p.eventOn(DEVICE_PIN_EVENT_NONE);
@@ -263,7 +327,7 @@ int uart_start_tx(const void *data, uint32_t numbytes) {
         // jd_line_falling() would normally execute from EXTI, which has high
         // priority - we simulate this by completely disabling IRQs
         jd_line_falling();
-        target_enable_irq();
+        jd_crit_exit();
         return -1;
     }
 
@@ -277,7 +341,7 @@ int uart_start_tx(const void *data, uint32_t numbytes) {
     pin_pulse();
 
     sws->sendDMA((uint8_t *)data, numbytes);
-    target_enable_irq();
+    jd_crit_exit();
 
     return 0;
 }

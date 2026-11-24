@@ -22,6 +22,14 @@ void target_enable_irq(void);
 void target_disable_irq(void);
 void target_wait_us(uint32_t n);
 
+// Critical sections of the Jacdac stack; use these instead of target_disable_irq/target_enable_irq.
+// With the nRF52 SoftDevice (Bluetooth) running, a global interrupt lock (__disable_irq) also
+// delays the SoftDevice's radio interrupts, and the SoftDevice asserts (panic 070). On CODAL with
+// Bluetooth, jd_crit_enter() therefore masks only application interrupts (Jacdac's own included)
+// and leaves the SoftDevice running. Elsewhere it is target_disable_irq(). Calls can be nested.
+void jd_crit_enter(void);
+void jd_crit_exit(void);
+
 void tim_init(void);
 uint64_t tim_get_micros(void);
 void tim_set_timer(int delta, cb_t cb);

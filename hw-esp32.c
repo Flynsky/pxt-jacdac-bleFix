@@ -96,6 +96,15 @@ void jd_panic(void) {
     target_panic(925);
 }
 
+// no SoftDevice here: Jacdac's critical sections are plain interrupt locks
+void jd_crit_enter(void) {
+    target_disable_irq();
+}
+
+void jd_crit_exit(void) {
+    target_enable_irq();
+}
+
 void tim_init() {
     init_log_pins();
 
