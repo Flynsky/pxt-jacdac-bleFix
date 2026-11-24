@@ -208,10 +208,11 @@ void __physStart() {
     jd_init();
     sendJDFrame = sendExtFrame;
 #if defined(MICROBIT_CODAL) && MICROBIT_CODAL
+    // WebUSB bridge (MakeCode / dashboard over USB) always runs; the BLE transport, when compiled
+    // in, chains onto its logJDFrame so frames go out over both.
+    mbbridge_init();
 #if CONFIG_ENABLED(DEVICE_BLE) && CONFIG_ENABLED(JACDAC_BLE_TRANSPORT)
     jdble_init();
-#else
-    mbbridge_init();
 #endif
 #endif
 }

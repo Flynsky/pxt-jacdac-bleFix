@@ -25,6 +25,7 @@
         "JacdacBLE.h",
         "JacdacBLE.cpp",
         "jdble.cpp",
+        "jdble.ts",
         "microbit.ts",
         "calliopemini.ts",
         "mbcompat.ts",

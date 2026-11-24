@@ -8,180 +8,231 @@
 
 #if CONFIG_ENABLED(DEVICE_BLE) && CONFIG_ENABLED(JACDAC_BLE_TRANSPORT)
 
-#include "ExternalEvents.h"
 #include "JacdacBLE.h"
-#include "MicroBitFiber.h"
-#include "ErrorNo.h"
-#include "NotifyEvents.h"
 
-#define BLE_GATT_EFFECTIVE_MTU      20
-#define JD_BLE_HEADER_SIZE          2
-#define JD_BLE_DATA_SIZE            (BLE_GATT_EFFECTIVE_MTU - JD_BLE_HEADER_SIZE)
-#define JD_BLE_FIRST_CHUNK_FLAG     0x80
+using namespace jacdac;
 
+// f8530001-a97f-49f5-a554-3e373fbea2d5, big-endian (RegisterBaseUUID reverses it)
+const uint8_t JacdacBLE::base_uuid[16] = {0xf8, 0x53, 0x00, 0x01, 0xa9, 0x7f, 0x49, 0xf5,
+                                          0xa5, 0x54, 0x3e, 0x37, 0x3f, 0xbe, 0xa2, 0xd5};
 
-const uint8_t  JacdacBLE::base_uuid[ 16] =
-{0xf8, 0x53, 0x00, 0x01, 0xa9, 0x7f, 0x49, 0xf5, 0xa5, 0x54, 0x3e, 0x37, 0x3f, 0xbe, 0xa2, 0xd5};
-// { 0xd5,0xa2,0xbe,0x3f,0x37,0x3e,0x54,0xa5,0xf5,0x49,0x7f,0xa9,0xf2,0x8a,0x53,0xf8 };
+const uint16_t JacdacBLE::serviceUUID = 0x0001;
+const uint16_t JacdacBLE::charUUID[mbbs_cIdxCOUNT] = {
+    0x0002, // TX: device -> PC
+    0x0003, // RX: PC -> device
+    0x0004  // diagnostics
+};
 
-const uint16_t JacdacBLE::serviceUUID               = 0x0001;
-const uint16_t JacdacBLE::charUUID[ mbbs_cIdxCOUNT] = { 0x0002, // tx from device to PC
-                                                        0x0003, // rx from PC to device
-                                                        0x0004 // diagnostics from PHY
-                                                      };
+JacdacBLE::JacdacBLE()
+    : rxLength(0), rxRemaining(0), rxActive(false), txCurrent(NULL), txSent(0), txTotal(0),
+      txRemaining(0), txQueue(NULL), rxQueue(NULL) {
+    memset(txChar, 0, sizeof(txChar));
+    memset(rxChar, 0, sizeof(rxChar));
+    memset(&diag, 0, sizeof(diag));
 
-
-/**
- * Constructor for the UARTService.
- * @param _ble an instance of BLEDevice
- * @param rxBufferSize the size of the rxBuffer
- * @param txBufferSize the size of the txBuffer
- *
- * @note defaults to 20
- */
-JacdacBLE::JacdacBLE(BLEDevice &_ble, uint8_t rxBufferSize, uint8_t txBufferSize)
-{
-    txBuffer = (uint8_t *)malloc(JACDAC_BLE_BUFFER_SIZE);
-    rxBuffer = (uint8_t *)malloc(JACDAC_BLE_BUFFER_SIZE);
-    diagBuffer = (uint8_t *)malloc(sizeof(jd_diagnostics_t));
-
-    rxPointer = rxBuffer;
-    txPointer = txBuffer;
-
-    // Register the base UUID and create the service.
+    // Errors here are silent in CODAL (e.g. when the SoftDevice is out of vendor UUID bases,
+    // NRF_SDH_BLE_VS_UUID_COUNT); ok() checks the resulting handles.
     RegisterBaseUUID(base_uuid);
     CreateService(serviceUUID);
 
-    // Create the data structures that represent each of our characteristics in Soft Device.
-    CreateCharacteristic( mbbs_cIdxRX, charUUID[ mbbs_cIdxRX],
-                          rxBuffer,
-                          1, BLE_GATT_EFFECTIVE_MTU,
-                          microbit_propWRITE | microbit_propWRITE_WITHOUT);
-
-    CreateCharacteristic( mbbs_cIdxTX, charUUID[ mbbs_cIdxTX],
-                          txBuffer,
-                          1, BLE_GATT_EFFECTIVE_MTU,
-                          microbit_propINDICATE);
-
-    // Create the data structures that represent each of our characteristics in Soft Device.
-    CreateCharacteristic(mbbs_cIdxDIAG, charUUID[ mbbs_cIdxDIAG],
-                          diagBuffer,
-                          1, sizeof(jd_diagnostics_t),
-                          microbit_propREAD | microbit_propWRITE );
+    CreateCharacteristic(mbbs_cIdxTX, charUUID[mbbs_cIdxTX], txChar, 1, JD_BLE_CHUNK_SIZE,
+                         microbit_propNOTIFY);
+    // the SoftDevice writes incoming chunks here; they are reassembled into rxFrame
+    CreateCharacteristic(mbbs_cIdxRX, charUUID[mbbs_cIdxRX], rxChar, 1, JD_BLE_CHUNK_SIZE,
+                         microbit_propWRITE | microbit_propWRITE_WITHOUT);
+    // READAUTH: onDataRead() refreshes the bus statistics right before each read
+    CreateCharacteristic(mbbs_cIdxDIAG, charUUID[mbbs_cIdxDIAG], (uint8_t *)&diag, sizeof(diag),
+                         sizeof(diag), microbit_propREAD | microbit_propREADAUTH);
 }
 
-
-/**
-  * Invoked when BLE disconnects.
-  */
-void JacdacBLE::onDisconnect( const microbit_ble_evt_t *p_ble_evt)
-{
+bool JacdacBLE::ok() {
+    return bs_uuid_type != 0 && valueHandle(mbbs_cIdxTX) != 0 &&
+           charHandles(mbbs_cIdxTX)->cccd != 0 && valueHandle(mbbs_cIdxRX) != 0;
 }
 
-
-/**
-  * A callback function for whenever a Bluetooth device consumes our TX Buffer
-  */
-void JacdacBLE::onConfirmation( const microbit_ble_evt_hvc_t *params)
-{
+bool JacdacBLE::subscribed() {
+    return getConnectionHandle() != BLE_CONN_HANDLE_INVALID &&
+           notifyChrValueEnabled(mbbs_cIdxTX);
 }
 
-/**
-  * A callback function for whenever a Bluetooth device writes to our RX characteristic.
-  */
-void JacdacBLE::onDataWritten(const microbit_ble_evt_write_t *params)
-{
+int JacdacBLE::queueTx(const jd_frame_t *frame) {
+    if (!subscribed())
+        return -1; // nobody listening
+    if (copyAndAppend(&txQueue, (jd_frame_t *)frame, JD_BLE_MAX_TX_QUEUE) < 0) {
+        diag.tx_dropped++;
+        return -1;
+    }
+    return 0;
+}
+
+void JacdacBLE::flushTx() {
+    if (txCurrent) {
+        free(txCurrent);
+        txCurrent = NULL;
+    }
+    jd_crit_enter();
+    LinkedFrame *q = txQueue;
+    txQueue = NULL;
+    jd_crit_exit();
+    while (q) {
+        LinkedFrame *next = q->next;
+        free(q);
+        q = next;
+    }
+}
+
+void JacdacBLE::pumpTx() {
+    for (;;) {
+        if (!subscribed()) {
+            flushTx();
+            return;
+        }
+
+        if (!txCurrent) {
+            jd_crit_enter();
+            txCurrent = txQueue;
+            if (txCurrent)
+                txQueue = txCurrent->next;
+            jd_crit_exit();
+            if (!txCurrent)
+                return;
+            int size = JD_FRAME_SIZE(&txCurrent->frame);
+            txTotal = (size + JD_BLE_DATA_SIZE - 1) / JD_BLE_DATA_SIZE;
+            txRemaining = txTotal - 1;
+            txSent = 0;
+        }
+
+        int size = JD_FRAME_SIZE(&txCurrent->frame);
+        int n = size - txSent;
+        if (n > JD_BLE_DATA_SIZE)
+            n = JD_BLE_DATA_SIZE;
+
+        uint8_t chunk[JD_BLE_CHUNK_SIZE];
+        chunk[0] = (txTotal & 0x7f) | (txSent == 0 ? JD_BLE_FIRST_CHUNK_FLAG : 0);
+        chunk[1] = txRemaining;
+        memcpy(chunk + JD_BLE_HEADER_SIZE, (uint8_t *)&txCurrent->frame + txSent, n);
+        uint16_t len = n + JD_BLE_HEADER_SIZE;
+
+        ble_gatts_hvx_params_t hvx;
+        memset(&hvx, 0, sizeof(hvx));
+        hvx.handle = valueHandle(mbbs_cIdxTX);
+        hvx.type = BLE_GATT_HVX_NOTIFICATION;
+        hvx.p_len = &len;
+        hvx.p_data = chunk;
+
+        uint32_t err = sd_ble_gatts_hvx(getConnectionHandle(), &hvx);
+        if (err == NRF_SUCCESS) {
+            txSent += n;
+            if (txRemaining)
+                txRemaining--;
+            if (txSent >= size) {
+                free(txCurrent);
+                txCurrent = NULL;
+                diag.tx_frames++;
+            }
+        } else if (err == NRF_ERROR_RESOURCES || err == NRF_ERROR_BUSY) {
+            // SoftDevice TX buffers are full; BLE_GATTS_EVT_HVN_TX_COMPLETE resumes us
+            return;
+        } else {
+            // disconnected, notifications turned off, ...: drop everything, never retry forever
+            flushTx();
+            return;
+        }
+    }
+}
+
+LinkedFrame *JacdacBLE::popRx() {
+    jd_crit_enter();
+    LinkedFrame *f = rxQueue;
+    if (f)
+        rxQueue = f->next;
+    jd_crit_exit();
+    return f;
+}
+
+void JacdacBLE::rxReset() {
+    rxActive = false;
+    rxLength = 0;
+    rxRemaining = 0;
+}
+
+// SoftDevice event IRQ: reassemble, queue, and let a fiber deliver the frame (JACDAC_BLE_EVT_RX)
+void JacdacBLE::rxChunk(const uint8_t *data, uint16_t len) {
+    if (len < JD_BLE_HEADER_SIZE || len > JD_BLE_CHUNK_SIZE) {
+        diag.rx_errors++;
+        rxReset();
+        return;
+    }
+
+    if (data[0] & JD_BLE_FIRST_CHUNK_FLAG) {
+        if (rxActive)
+            diag.rx_errors++; // previous frame never completed
+        rxActive = true;
+        rxLength = 0;
+        rxRemaining = data[0] & 0x7f;
+    }
+
+    if (!rxActive || rxRemaining == 0) {
+        // chunk without a first chunk (e.g. after an error): wait for the next frame
+        diag.rx_errors++;
+        rxReset();
+        return;
+    }
+
+    rxRemaining--;
+    uint16_t n = len - JD_BLE_HEADER_SIZE;
+    if (data[1] != rxRemaining || rxLength + n > sizeof(rxFrame)) {
+        diag.rx_errors++;
+        rxReset();
+        return;
+    }
+
+    memcpy((uint8_t *)&rxFrame + rxLength, data + JD_BLE_HEADER_SIZE, n);
+    rxLength += n;
+    if (rxRemaining > 0)
+        return;
+
+    rxActive = false;
+    unsigned frameSize = JD_FRAME_SIZE(&rxFrame);
+    if (rxLength < JD_SERIAL_FULL_HEADER_SIZE || frameSize > rxLength ||
+        frameSize > sizeof(jd_frame_t)) {
+        diag.rx_errors++;
+        return;
+    }
+    if (copyAndAppend(&rxQueue, &rxFrame, JD_BLE_MAX_RX_QUEUE) < 0) {
+        diag.rx_errors++;
+        return;
+    }
+    diag.rx_frames++;
+    MicroBitEvent(DEVICE_ID_JACDAC_BLE, JACDAC_BLE_EVT_RX);
+}
+
+void JacdacBLE::onDataWritten(const microbit_ble_evt_write_t *params) {
     if (params->handle == valueHandle(mbbs_cIdxRX))
-    {
-        uint16_t bytesWritten = params->len;
-
-        if (params->data[0] & JD_BLE_FIRST_CHUNK_FLAG) {
-            if (this->rxPointer > this->rxBuffer)
-                DMESG("JD_BLE: pkt dropped.");
-
-            this->rxPointer = this->rxBuffer;
-            this->rxChunkCounter = params->data[0] & 0x7f; 
-        }
-
-        this->rxChunkCounter = (this->rxChunkCounter == 0) ? 0 : this->rxChunkCounter - 1;
-
-        if (params->data[1] != this->rxChunkCounter)
-            DMESG("JD_BLE: Data out of order");
-        else
-        {
-            memcpy(this->rxPointer, &params->data[2], bytesWritten - JD_BLE_HEADER_SIZE);
-            this->rxPointer += bytesWritten - JD_BLE_HEADER_SIZE;
-        }
-
-        if (this->rxChunkCounter == 0)
-        {
-            MicroBitEvent(DEVICE_ID_JACDAC_BLE, MICROBIT_JACDAC_S_EVT_RX);
-            this->rxPointer = this->rxBuffer;
-        }
-    }
-
-    if (params->handle == valueHandle(mbbs_cIdxDIAG))
-    {
-        indicateChrValue(mbbs_cIdxDIAG, diagBuffer, sizeof(jd_diagnostics_t));
-    }
+        rxChunk(params->data, params->len);
 }
 
-/**
- * Send a Jacdac byte buffer.
- * @param buf pointer to the buffer
- * @param len length of the buffer
- *
- * @return MICROBIT_OK on success or MICROBIT_NO_RESOURCES if tx queue is full
- */
-int JacdacBLE::send(uint8_t *buf, int length)
-{
-    if(length < 1)
-        return MICROBIT_INVALID_PARAMETER;
-
-    bool updatesEnabled = indicateChrValueEnabled( mbbs_cIdxTX);
-
-    if( !getConnected() && !updatesEnabled)
-        return MICROBIT_NOT_SUPPORTED;
-    
-    ble_gatts_hvx_params_t hvx_params;
-    hvx_params.handle = chars[mbbs_cIdxTX].charHandles()->value;
-    hvx_params.type   = BLE_GATT_HVX_INDICATION;
-    hvx_params.offset = 0;
-    hvx_params.p_len  = 0;
-    hvx_params.p_data = NULL;
-
-    int totalChunks = (length / (JD_BLE_DATA_SIZE)) + ((length % (JD_BLE_DATA_SIZE)) != 0);
-    int remainingChunks = totalChunks - 1;
-    int sent = 0;
-    uint8_t temp[BLE_GATT_EFFECTIVE_MTU] = { 0 };
-
-    while(sent < length) {
-        uint16_t n = min(JD_BLE_DATA_SIZE, length - sent);
-        uint16_t total = n + JD_BLE_HEADER_SIZE;
-        temp[0] = (totalChunks & 0x7f);
-
-        if (sent == 0)
-            temp[0] |= JD_BLE_FIRST_CHUNK_FLAG;
-            
-        temp[1] = remainingChunks;
-
-        memcpy(&temp[2], buf + sent, n);
-
-        hvx_params.p_len  = &total;
-        hvx_params.p_data = temp;
-        if (sd_ble_gatts_hvx(getConnectionHandle(), &hvx_params) == NRF_SUCCESS)
-        {
-            sent += n;
-            remainingChunks = (remainingChunks == 0 ? 0 : remainingChunks - 1);
-        }
-    }
-
-    return MICROBIT_OK;
+void JacdacBLE::onDataRead(microbit_onDataRead_t *params) {
+    if (params->handle != valueHandle(mbbs_cIdxDIAG))
+        return;
+    // the value lives in `diag` (is_value_user); refresh it at the start of each (long) read
+    if (params->offset == 0)
+        memcpy(&diag.bus, jd_get_diagnostics(), sizeof(diag.bus));
+    params->update = false;
 }
 
-
-ManagedBuffer JacdacBLE::read() {
-    return ManagedBuffer(rxBuffer, JD_FRAME_SIZE((jd_frame_t *)this->rxBuffer));
+void JacdacBLE::onDisconnect(const microbit_ble_evt_t *) {
+    rxReset();
+    // the pump sees there is no subscriber any more and frees the queue
+    if (txPending())
+        MicroBitEvent(DEVICE_ID_JACDAC_BLE, JACDAC_BLE_EVT_TX);
 }
-#endif // DEVICE_BLE
+
+bool JacdacBLE::onBleEvent(const microbit_ble_evt_t *p_ble_evt) {
+    if (p_ble_evt->header.evt_id == BLE_GATTS_EVT_HVN_TX_COMPLETE && txPending())
+        MicroBitEvent(DEVICE_ID_JACDAC_BLE, JACDAC_BLE_EVT_TX);
+    return MicroBitBLEService::onBleEvent(p_ble_evt);
+}
+
+#endif // DEVICE_BLE && JACDAC_BLE_TRANSPORT
 #endif // MICROBIT_CODAL
