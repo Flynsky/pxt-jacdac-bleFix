@@ -1,0 +1,29 @@
+{
+    "name": "jacdac-bluetooth-transport",
+    "version": "1.9.42",
+    "description": "Jacdac over Bluetooth LE: lets the Jacdac dashboard connect to the micro:bit V2 / Calliope mini 3 without a cable.",
+    "dependencies": {
+        "core": "*",
+        "jacdac": "github:Flynsky/pxt-jacdac-bleFix"
+    },
+    "files": [
+        "README.md"
+    ],
+    "testFiles": [
+        "test.ts"
+    ],
+    "supportedTargets": [
+        "microbit",
+        "calliopemini"
+    ],
+    "yotta": {
+        "config": {
+            "JACDAC_BLE_TRANSPORT": 1,
+            "microbit-dal": {
+                "bluetooth": {
+                    "enabled": 1
+                }
+            }
+        }
+    }
+}

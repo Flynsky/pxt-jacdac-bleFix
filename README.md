@@ -16,6 +16,12 @@ This project contains [Jacdac](https://aka.ms/jacdac) host and client services f
 -   MakeCode Arcade, https://arcade.makecode.com/
 -   Calliope, https://makecode.calliope.cc/
 
+### Jacdac dashboard over Bluetooth (micro:bit V2 / Calliope mini 3)
+
+Add `https://github.com/Flynsky/pxt-jacdac-bleFix/bluetooth-transport` as well to send the Jacdac
+traffic over Bluetooth LE, so the Jacdac dashboard can connect without a cable (Web Bluetooth).
+USB keeps working at the same time. See [bluetooth-transport/README.md](bluetooth-transport/README.md).
+
 ## Developer section
 
 Issues are tracked at https://github.com/jacdac/jacdac/issues .
